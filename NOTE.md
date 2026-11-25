@@ -1,5 +1,7 @@
 # Hand-in note
 
+Repo: https://github.com/theCityCR/Internship-Opening-Feed (MIT)
+
 Setup: String Web Access key for all fetches; the provided Claude key for extraction (`claude-haiku-4-5`).
 Cost figures use the Haiku 4.5 list price I assumed in `feed/extract.py` ($1 / $5 per million tokens), not a billed amount.
 
@@ -38,7 +40,7 @@ pay, work mode, visa sponsorship and graduation years, and writes a terminal tab
 - `visa_sponsorship` is empty for all 141 (none of the postings state it), so that field is untested on live positive examples.
 - No test mocks the Claude call; the model path is covered only by the eval run and the validator unit tests.
 - Not done: a requirements change has not arrived yet, so nothing was reworked for one.
-- The files are staged in git but not committed, and I have not created or pushed to a GitHub repository. `.env`, `.cache/`, `state/` and `out/` are gitignored, and a scan found neither API key in any other file.
+- `.env`, `.cache/`, `state/` and `out/` are gitignored, and a scan found neither API key in any other file or in the commit.
 
 ## One failure case
 Work mode. My first regex marked every Palantir posting "onsite" because the shared boilerplate says to "go onsite and meet with customer analysts" and that employees are required to work from an office if the posting says Onsite. None of that states the role's work mode. That was 5 of the 15 samples wrong and I only saw it because the labels were written before the output. I narrowed the regex to role-specific phrasing and told the model to ignore company-wide boilerplate. Result: work mode is now filled for only 2 of 141 postings, which is correct but sparse. Most postings simply do not state a mode.
