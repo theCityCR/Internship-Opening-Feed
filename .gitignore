@@ -2,6 +2,7 @@
 .cache/
 state/
 out/
+eval/audit_flags.json
 .idea/
 .venv/
 __pycache__/

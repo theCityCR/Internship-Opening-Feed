@@ -23,8 +23,8 @@ from .models import CATEGORIES, Job
 MODEL = "claude-haiku-4-5"
 PRICE_IN_PER_MTOK = 1.00     # USD, claude-haiku-4-5 list price
 PRICE_OUT_PER_MTOK = 5.00
-MAX_DESC_CHARS = 7000
-PROMPT_VERSION = "v2"   # bump to invalidate the LLM cache whenever SYSTEM changes
+MAX_DESC_CHARS = 16000   # longest posting seen is 13.4k chars; 7000 cut off a "$60 per hour" sentence
+PROMPT_VERSION = "v6"   # bump to invalidate the LLM cache whenever SYSTEM changes
 
 # ---------------------------------------------------------------- regex layer
 _SEASON = r"(Summer|Fall|Autumn|Winter|Spring)"
@@ -141,11 +141,12 @@ def regex_extract(text: str) -> dict[str, Any]:
 SYSTEM = """You extract structured facts from ONE internship job posting. Reply with a single JSON object and nothing else.
 Rules:
 - Only use what the text explicitly says. If the text does not say, use null. Never guess or infer.
-- category: exactly one of backend, frontend, full-stack, mobile, ML/AI, data, infrastructure, security, quant, hardware, other. Judge by the work described (title first). Non-engineering roles (design, marketing, finance, sales) are "other".
-- term: the internship's period as written, e.g. "Summer 2027". season: Summer, Fall, Winter or Spring, only if stated.
+- category: exactly one of backend, frontend, full-stack, mobile, ML/AI, data, infrastructure, security, quant, hardware, other. Judge by the work described (title first). Non-engineering roles (design, marketing, finance, sales) are "other". Chip and silicon work (VLSI, ASIC, RTL, circuit design, design verification, EDA, computer or GPU architecture, firmware) is "hardware". Compilers, math/linear-algebra libraries, simulation and systems software are "backend". "infrastructure" is for cloud, platform, networking, reliability and observability software. Forward Deployed Software Engineer roles are "full-stack". Research on machine-learning models is "ML/AI".
+- term: "<Season> <year>" (e.g. "Summer 2027") when the text names a season and a year for the internship itself; just "<year>" (e.g. "2027") when only a year is given; otherwise null. The year must be printed in the text: if the text says only "Summer" with no year, term is "Summer" is NOT allowed, use null. A graduation date is NOT the term. Never put a program name or a date range in term. A start month such as "beginning October 2026" gives no season, so term is "2026".
+- season: Summer, Fall, Winter or Spring ONLY if that exact word appears in the text for the internship period. Never convert months to a season (May-August is not stated as "Summer").
 - pay_min / pay_max: numbers for the intern pay range exactly as printed (no conversion). pay_currency: ISO code. pay_period: hour, week, month or year as printed. If only one figure is given, set both to it. Ignore salary ranges that are clearly for non-intern roles.
-- work_mode: onsite, hybrid or remote, only if the posting states it for THIS role. Company-wide boilerplate (e.g. "many teams offer hybrid options", "some roles allow remote work", "we encourage employees to work from our offices") does NOT count: use null.
-- visa_sponsorship: "yes" or "no" only if the posting says whether sponsorship is offered.
+- work_mode: onsite, hybrid or remote, only if the posting states it for THIS role. Company-wide boilerplate (e.g. "many teams offer hybrid options", "some roles allow remote work", "we encourage employees to work from our offices") does NOT count: use null. An office address or a relocation request alone does not state a work mode.
+- visa_sponsorship: "yes" or "no" only if the posting explicitly mentions visas or sponsorship. "U.S. Person required", citizenship or clearance requirements are NOT a statement about sponsorship: use null.
 - grad_years: who may apply by graduation date/class, copied briefly (e.g. "Class of 2027 or 2028"), else null.
 Schema: {"category":str,"term":str|null,"season":str|null,"pay_min":number|null,"pay_max":number|null,"pay_currency":str|null,"pay_period":str|null,"work_mode":str|null,"visa_sponsorship":str|null,"grad_years":str|null}"""
 
@@ -188,6 +189,10 @@ def validate(ans: dict[str, Any], text: str) -> dict[str, Any]:
             and re.search(season, text, re.I):
         out["season"] = season.capitalize()
     term = normalise_term(ans.get("term"))
+    if term and "season" not in out:
+        # the season word is not in the text (model converted months, e.g. May-August -> Summer):
+        # keep only the year, if the year itself is in the text
+        term = re.search(r"20\d\d", term).group(0)
     if term and all(w.lower() in text.lower() for w in re.findall(r"[A-Za-z]{4,}|20\d\d", term)):
         out["term"] = term
 
@@ -205,8 +210,16 @@ def validate(ans: dict[str, Any], text: str) -> dict[str, Any]:
     if ans.get("visa_sponsorship") in ("yes", "no") and re.search(r"sponsor|visa|work authori[sz]ation", text, re.I):
         out["visa_sponsorship"] = ans["visa_sponsorship"]
     gy = ans.get("grad_years")
-    if isinstance(gy, str) and gy.strip() and re.search(r"20\d\d|graduat|class of|degree|enrolled|student", text, re.I):
+    # must name an actual graduation year (or high school), and every year it names must be in the
+    # text. Degree levels ("pursuing a PhD") and "state your graduation date" requirements carry no year.
+    if isinstance(gy, str) and re.search(r"\b20\d\d\b|high school", gy, re.I) \
+            and all(y in text for y in re.findall(r"\b20\d\d\b", gy)):
         out["grad_years"] = gy.strip()[:120]
+    # "February 2027 - August 2027" + season Spring: say "Spring 2027" when the text does
+    if out.get("season") and re.fullmatch(r"20\d\d", out.get("term") or ""):
+        combo = f"{out['season']} {out['term']}"
+        if combo.lower() in text.lower():
+            out["term"] = combo
     return out
 
 
@@ -224,7 +237,17 @@ class LLMExtractor:
         self.in_tokens = self.out_tokens = 0
         self.budget_hit = False
         self.last_error = ""
+        self.answers_checked = self.answers_altered = 0   # raw answers the validator had to change
+        self.altered: dict[str, int] = {}                 # field -> times its raw value was dropped/changed
         self._lock = threading.Lock()
+
+    def record_validation(self, raw: dict[str, Any], kept: dict[str, Any]) -> None:
+        bad = [k for k in _FIELDS if raw.get(k) not in (None, "") and kept.get(k) != raw.get(k)]
+        with self._lock:
+            self.answers_checked += 1
+            self.answers_altered += bool(bad)
+            for k in bad:
+                self.altered[k] = self.altered.get(k, 0) + 1
 
     @property
     def cost_usd(self) -> float:
@@ -277,7 +300,9 @@ class LLMExtractor:
                 "llm_failures": self.failures, "input_tokens": self.in_tokens,
                 "output_tokens": self.out_tokens, "cost_usd": round(self.cost_usd, 4),
                 "budget_usd": self.max_usd, "budget_hit": self.budget_hit,
-                "last_error": self.last_error}
+                "last_error": self.last_error,
+                "answers_altered_by_validator": f"{self.answers_altered}/{self.answers_checked}",
+                "fields_altered": dict(self.altered)}
 
 
 def enrich(job: Job, llm: LLMExtractor | None) -> str:
@@ -288,6 +313,7 @@ def enrich(job: Job, llm: LLMExtractor | None) -> str:
     method = "regex"
     if ans:
         found = validate(ans, text)
+        llm.record_validation(ans, found)
         method = "llm"
     elif llm:
         method = "regex+fallback"

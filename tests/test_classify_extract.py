@@ -62,6 +62,65 @@ def test_validate_drops_ungrounded_model_output():
     assert "visa_sponsorship" not in bad              # text never mentions visas
 
 
+def test_validate_rejects_degree_level_as_grad_years():
+    text = "Must be pursuing a B.S., M.S., or Ph.D. degree. Summer 2027."
+    assert "grad_years" not in validate({"category": "other", "grad_years": "B.S., M.S., or Ph.D. degree"}, text)
+    ok = validate({"category": "other", "grad_years": "graduating in 2027 or 2028"}, "Must be graduating in 2027 or 2028.")
+    assert ok["grad_years"] == "graduating in 2027 or 2028"
+
+
+def test_grad_years_needs_a_real_year():
+    t = "Anticipated graduation date (month and year) must be clearly indicated on your resume. Pursuing a PhD."
+    for bad in ("anticipated graduation date (month and year)", "within 12-months of graduation", "Pursuing a PhD"):
+        assert "grad_years" not in validate({"category": "other", "grad_years": bad}, t)
+    assert validate({"category": "other", "grad_years": "graduating in 2028"}, "Must be graduating in 2028.")["grad_years"]
+    # a year that is not in the text is rejected
+    assert "grad_years" not in validate({"category": "other", "grad_years": "graduating in 2031"}, "Must be graduating in 2028.")
+
+
+def test_validate_drops_season_converted_from_months():
+    text = "Paid full-time internship between May-August, 2027."
+    out = validate({"category": "other", "term": "May-August, 2027", "season": "Summer"}, text)
+    assert "season" not in out          # the word "summer" never appears
+    assert out["term"] == "2027"        # date range reduced to the year
+
+
+def test_validate_keeps_year_when_model_invented_the_season_word():
+    text = "Paid full-time internship between May-August, 2027."
+    out = validate({"category": "other", "term": "Summer 2027", "season": "Summer"}, text)
+    assert "season" not in out and out["term"] == "2027"
+    # an invented year is still dropped entirely
+    assert "term" not in validate({"category": "other", "term": "Summer 2025", "season": "Summer"}, "Summer internship.")
+
+
+def test_validate_combines_season_and_year_when_text_has_both():
+    text = "PCIe Design Verification Intern - Spring 2027. February 2027 - August 2027."
+    out = validate({"category": "hardware", "term": "February 2027 - August 2027", "season": "Spring"}, text)
+    assert (out["season"], out["term"]) == ("Spring", "Spring 2027")
+
+
+def test_validate_drops_visa_answer_when_no_visa_words_in_text():
+    out = validate({"category": "other", "visa_sponsorship": "no"}, "U.S. Person Required. Report scams to the FBI.")
+    assert "visa_sponsorship" not in out
+
+
+def test_validate_drops_work_mode_without_a_supporting_word():
+    assert "work_mode" not in validate({"category": "other", "work_mode": "onsite"}, "Build GPUs. Summer 2027.")
+
+
+def test_validate_keeps_pay_past_old_7000_char_cut():
+    from feed.extract import MAX_DESC_CHARS
+    assert MAX_DESC_CHARS > 13500       # longest real posting is 13.4k chars
+
+
+def test_record_validation_counts_altered_answers():
+    from feed.extract import LLMExtractor
+    llm = LLMExtractor("unused", cache_dir="/tmp/_llm_test_cache")
+    raw = {"category": "other", "work_mode": "onsite", "term": "2027 Internships"}
+    llm.record_validation(raw, validate(raw, "Summer"))
+    assert llm.answers_altered == 1 and llm.altered["work_mode"] == 1 and llm.altered["term"] == 1
+
+
 def test_heuristic_category():
     assert heuristic_category("Machine Learning Engineer, Intern") == "ML/AI"
     assert heuristic_category("Quantitative Trader Intern") == "quant"

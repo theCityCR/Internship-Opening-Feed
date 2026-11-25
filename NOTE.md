@@ -18,11 +18,12 @@ pay, work mode, visa sponsorship and graduation years, and writes a terminal tab
 ## Checks run and results
 | Check | Result |
 |---|---|
-| Unit tests from saved real responses (`pytest`) | 20 passed |
+| Unit tests from saved real responses (`pytest`) | 29 passed |
+| Customer claim "1 in 10 LLM JSON is wrong" (`eval/audit_llm.py`, all 141 raw answers, mechanical checks) | **Confirmed for the raw JSON**: 14.9% flagged with the first prompt, 13.5% with the final one. After the validator, the final rows have 0 violations of the same checks (`eval/check_output.py`) |
 | Completeness vs site total | Stripe 772/772 read (Greenhouse `meta.total`), NVIDIA 75/75 read (Workday `total`, 4 pages), Palantir 305 read (Lever states no total, so not cross-checked) |
 | Internships found | 141 (Stripe 20, Palantir 46, NVIDIA 75) |
 | Rows with source ID and apply link | 141/141 |
-| Cost of the full run | 82 String requests (budget 150); about 89 across the whole session, including probes. Claude about $0.24 for the 141 postings; about $0.55 across the session, including re-runs after prompt changes |
+| Cost of the full run | 82 String requests (budget 150); about 89 across the whole session, including probes. Claude about $0.33 per full run of 141 postings; about $1.9 across the session, because I re-ran all 141 four more times while changing the prompt (v3 to v6) |
 | Second-run report, unchanged data | new=0 closed=0 changed=0 |
 | Second-run report, tampered snapshot (`tests/tamper_snapshot.py`) | found 1 new, 1 closed, 1 changed, as planted |
 | Extraction accuracy, 15 postings x 6 fields | regex only 87/90 (97%); regex + Claude 88/90 (98%) |
@@ -44,6 +45,14 @@ pay, work mode, visa sponsorship and graduation years, and writes a terminal tab
 
 ## One failure case
 Work mode. My first regex marked every Palantir posting "onsite" because the shared boilerplate says to "go onsite and meet with customer analysts" and that employees are required to work from an office if the posting says Onsite. None of that states the role's work mode. That was 5 of the 15 samples wrong and I only saw it because the labels were written before the output. I narrowed the regex to role-specific phrasing and told the model to ignore company-wide boilerplate. Result: work mode is now filled for only 2 of 141 postings, which is correct but sparse. Most postings simply do not state a mode.
+
+## The "one in ten is wrong" claim
+I tested it before changing anything. All 141 cached raw answers were checked mechanically and the flagged ones read by hand.
+- **Raw JSON: the claim holds, at 13.5% to 14.9%.** What the model got wrong: it answered `work_mode: onsite` where the text says nothing (3 postings); inferred `visa_sponsorship: no` from "U.S. Person Required" (1); converted "May-August" into `season: Summer` (3); returned `term` as "Year at Palantir" or a date range (14); and returned a degree level such as "Pursuing a PhD" as `grad_years` (about 9 even with the final prompt).
+- **The validator was hiding this.** It drops answers the text does not support. The final output rows have 0 violations of the mechanical checks. Before my changes the validator had silently altered answers and nothing reported it. Each run now prints `answers_altered_by_validator` (17/141 with the final prompt).
+- **A real defect reached the output:** my 7,000-character cut removed a "$60 per hour" sentence for one Stripe posting, so its pay was empty. The cut is now 16,000 (longest posting seen: 13.4k).
+- **My prompt changes did not make the raw JSON reliably better.** Flag rate by prompt version: v2 14.9%, v3 46%, v4 29%, v5 33%, v6 13.5%. Several tighter wordings made the model fill `grad_years` with degree levels more often. v6 is close to the original wording for that field. The remaining gain comes from the validator and the cut, not the prompt.
+- **What this does not show:** `category` is a judgement call and is not mechanically checkable. I added category rules to the prompt (chip work is hardware, Forward Deployed is full-stack) from my own reading of 141 titles, with no labelled ground truth. The checks are tuned to this one data set of 141 postings and the same three companies.
 
 ## AI output I checked or corrected
 - **Claude's `term` values.** It returned "May-August, 2027" and "2027 Internships". I added a normaliser so the field is always "<Season> <year>" or just "<year>".
