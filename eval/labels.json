@@ -1,0 +1,21 @@
+{
+  "_status": "AI-DRAFTED labels, written from the description text before looking at any model output. A human must verify them (eval/show_samples.py and eval/grep_samples.py help) before the accuracy number is quoted as 'hand-labelled'.",
+  "_rules": "null = the text does not say. term is copied as written ('Summer 2027', or '2027' when no season is given). Single pay figures have min == max. Company-wide boilerplate (e.g. 'many teams offer hybrid options') does not count as work mode.",
+  "labels": {
+    "stripe:8194287": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "stripe:8186367": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "stripe:8194283": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "stripe:8332683": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "stripe:8130807": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "palantir:774cf5c9-bf6a-4d77-bf60-d50ef1beb1a0": {"term": null, "season": null, "pay_min": null, "pay_max": null, "pay_period": null, "work_mode": null},
+    "palantir:e6ff8bf2-135e-474d-ad37-24f490ae1dd2": {"term": null, "season": null, "pay_min": 10000, "pay_max": 10000, "pay_period": "month", "work_mode": null},
+    "palantir:fa060d94-f85d-4d02-be58-b81787fe57e5": {"term": null, "season": null, "pay_min": 8500, "pay_max": 8500, "pay_period": "month", "work_mode": null},
+    "palantir:45e4617d-d658-4b30-8dc9-378ca84a027a": {"term": null, "season": null, "pay_min": 10500, "pay_max": 10500, "pay_period": "month", "work_mode": null},
+    "palantir:3ab9e715-1ea9-4c6c-ad50-7340eac14e86": {"term": null, "season": null, "pay_min": 10500, "pay_max": 10500, "pay_period": "month", "work_mode": null},
+    "nvidia:JR2029531": {"term": "Summer 2027", "season": "Summer", "pay_min": 20, "pay_max": 86, "pay_period": "hour", "work_mode": null},
+    "nvidia:JR2023496": {"term": "2027", "season": null, "pay_min": 20, "pay_max": 71, "pay_period": "hour", "work_mode": null},
+    "nvidia:JR2029220": {"term": "Summer 2027", "season": "Summer", "pay_min": 20, "pay_max": 86, "pay_period": "hour", "work_mode": null},
+    "nvidia:JR2026839": {"term": "Summer 2027", "season": "Summer", "pay_min": 20, "pay_max": 94, "pay_period": "hour", "work_mode": null},
+    "nvidia:JR2025893": {"term": "2027", "season": null, "pay_min": 30, "pay_max": 94, "pay_period": "hour", "work_mode": null, "_note": "two location-specific ranges (38-94 and 30-94); labelled as the overall range"}
+  }
+}

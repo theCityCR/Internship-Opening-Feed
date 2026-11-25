@@ -1,0 +1,1 @@
+"""Internship openings feed."""
