@@ -1,5 +1,11 @@
 from feed.classify import heuristic_category, internship_rule
-from feed.extract import regex_extract, validate
+from feed.extract import (_money_seen, apply_evidence, find_grad_years, regex_extract,
+                          validate as _validate)
+
+
+def validate(ans, text):
+    """The value-grounding checks on their own (no quoted evidence); evidence has its own tests below."""
+    return _validate(ans, text, require_evidence=False)
 
 
 def test_title_rule_whole_words_only():
@@ -91,6 +97,15 @@ def test_validate_keeps_year_when_model_invented_the_season_word():
     assert "season" not in out and out["term"] == "2027"
     # an invented year is still dropped entirely
     assert "term" not in validate({"category": "other", "term": "Summer 2025", "season": "Summer"}, "Summer internship.")
+
+
+def test_summer_of_2027_is_accepted_even_if_season_left_empty():
+    text = "Offer master's internships for the summer of 2027."
+    out = validate({"category": "other", "term": "Summer 2027", "season": None}, text)
+    assert (out["term"], out["season"]) == ("Summer 2027", "Summer")
+    # months converted to a season are still rejected
+    out = validate({"category": "other", "term": "Summer 2027", "season": None}, "Between May-August, 2027.")
+    assert out["term"] == "2027" and "season" not in out
 
 
 def test_validate_combines_season_and_year_when_text_has_both():

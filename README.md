@@ -57,9 +57,12 @@ The description is built from each source's text fields, but some facts live onl
 - **Not used:** Greenhouse `offices` / `departments` / `education` (the education value is `education_required` for 19 of 20, so it says nothing useful), Greenhouse `updated_at`, Workday `postedOn` ("Posted 6 Days Ago", relative) and `timeType`, Lever `country`. Run `python eval/unused_fields.py` to list every field a source returns that is never read.
 
 ## How extraction works
-Regexes handle literal text (pay figures, "Summer 2027"). One Claude call per posting returns JSON; every answer is
-then checked against the description (a pay figure, season or term that isn't literally in the text is dropped, categories
-must be one of the 11) and company-wide boilerplate ("many teams offer hybrid options") is not accepted as a work mode.
+Regexes handle literal text (pay figures, "Summer 2027", graduation years). One Claude call per posting returns JSON.
+For term, season, pay, work mode and visa, the model must also quote the sentence it relied on; a value is kept only if
+that quote appears in the description and itself contains the value. Values are then checked against the text again
+(whole-number money match, categories must be one of the 11) and company-wide boilerplate ("many teams offer hybrid
+options") is not accepted as a work mode. Each run prints how many answers the checks had to change.
+`python eval/audit_llm.py` measures the raw model answers against the text.
 If Claude fails or the cap is hit, regexes and title keywords are used instead.
 
 ## Known gaps

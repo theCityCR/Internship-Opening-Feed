@@ -24,7 +24,7 @@ MODEL = "claude-haiku-4-5"
 PRICE_IN_PER_MTOK = 1.00     # USD, claude-haiku-4-5 list price
 PRICE_OUT_PER_MTOK = 5.00
 MAX_DESC_CHARS = 16000   # longest posting seen is 13.4k chars; 7000 cut off a "$60 per hour" sentence
-PROMPT_VERSION = "v6"   # bump to invalidate the LLM cache whenever SYSTEM changes
+PROMPT_VERSION = "v7"   # bump to invalidate the LLM cache whenever SYSTEM changes
 
 # ---------------------------------------------------------------- regex layer
 _SEASON = r"(Summer|Fall|Autumn|Winter|Spring)"
@@ -119,6 +119,21 @@ def _find_mode(text: str) -> str | None:
     return None
 
 
+_SEASONISH = r"(?:spring|summer|fall|autumn|winter|january|february|may|june|december)"
+GRAD_RE = re.compile(
+    r"\b(?:graduat\w*|class of)\b[^.!?\n;]{0,80}?\b20\d\d\b"
+    r"(?:\s*(?:,|/|or|and|-|–)\s*(?:" + _SEASONISH + r"\W{0,3}){0,2}20\d\d\b)*"
+    r"(?:\s+or\s+later)?", re.I)
+
+
+def find_grad_years(text: str) -> str | None:
+    """The graduation year(s) a posting asks for, copied from the text: 'graduating in 2027 or 2028',
+    'Class of 2028'. Only a phrase with a four-digit year counts; 'pursuing a PhD' or 'state your
+    graduation date' do not."""
+    m = GRAD_RE.search(text)
+    return re.sub(r"\s+", " ", m.group(0)).strip()[:120] if m else None
+
+
 def regex_extract(text: str) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for m in TERM_RE.finditer(text):
@@ -134,6 +149,9 @@ def regex_extract(text: str) -> dict[str, Any]:
     mode = _find_mode(text)
     if mode:
         out["work_mode"] = mode
+    grad = find_grad_years(text)
+    if grad:
+        out["grad_years"] = grad
     return out
 
 
@@ -147,20 +165,38 @@ Rules:
 - pay_min / pay_max: numbers for the intern pay range exactly as printed (no conversion). pay_currency: ISO code. pay_period: hour, week, month or year as printed. If only one figure is given, set both to it. Ignore salary ranges that are clearly for non-intern roles.
 - work_mode: onsite, hybrid or remote, only if the posting states it for THIS role. Company-wide boilerplate (e.g. "many teams offer hybrid options", "some roles allow remote work", "we encourage employees to work from our offices") does NOT count: use null. An office address or a relocation request alone does not state a work mode.
 - visa_sponsorship: "yes" or "no" only if the posting explicitly mentions visas or sponsorship. "U.S. Person required", citizenship or clearance requirements are NOT a statement about sponsorship: use null.
-- grad_years: who may apply by graduation date/class, copied briefly (e.g. "Class of 2027 or 2028"), else null.
-Schema: {"category":str,"term":str|null,"season":str|null,"pay_min":number|null,"pay_max":number|null,"pay_currency":str|null,"pay_period":str|null,"work_mode":str|null,"visa_sponsorship":str|null,"grad_years":str|null}"""
+- evidence: for EVERY non-null value among term, season, pay_min/pay_max, work_mode and visa_sponsorship, copy the shortest snippet (at most 200 characters) from the Title or Description that states it, character for character, with no ellipsis and no rewording. Put it under the keys term, season, pay, work_mode, visa_sponsorship (pay covers pay_min, pay_max, currency and period). If you cannot copy a snippet that states the value, set the value to null. The evidence for a null value is null.
+Schema: {"category":str,"term":str|null,"season":str|null,"pay_min":number|null,"pay_max":number|null,"pay_currency":str|null,"pay_period":str|null,"work_mode":str|null,"visa_sponsorship":str|null,"evidence":{"term":str|null,"season":str|null,"pay":str|null,"work_mode":str|null,"visa_sponsorship":str|null}}"""
 
+# Fields set on a Job. grad_years is no longer asked of the model (it was the field it got wrong most
+# often); it comes from find_grad_years().
 _FIELDS = ["category", "term", "season", "pay_min", "pay_max", "pay_currency", "pay_period",
            "work_mode", "visa_sponsorship", "grad_years"]
+MODEL_FIELDS = [f for f in _FIELDS if f != "grad_years"]   # value fields the model returns
+EVIDENCE_KEYS = ["term", "season", "pay", "work_mode", "visa_sponsorship"]
 
 
 def _money_seen(v: float, text: str) -> bool:
-    """Is the number v printed somewhere in text (as 45, 45.50, 45,000 or 45k)?"""
+    """Is the number v printed in text as a whole number (45, 45.50, 45,000 or 45k)?
+    Whole-number match: 20 is NOT found inside 2027 or 10,200."""
     flat = re.sub(r"[,\s]", "", text)
-    forms = {f"{v:.2f}".rstrip("0").rstrip("."), f"{v:,.0f}"}
-    if v >= 1000 and v % 1000 == 0:
-        forms.add(f"{int(v / 1000)}k")
-    return any(f in text or f in flat for f in forms if f)
+    forms = {f"{v:.2f}", f"{v:.2f}".rstrip("0").rstrip(".")}
+    if v == int(v):
+        forms |= {str(int(v)), f"{int(v):,}"}
+        if v >= 1000 and v % 1000 == 0:
+            forms.add(f"{int(v / 1000)}k")
+    for f in forms:
+        pat = r"(?<![\d.,])" + re.escape(f) + r"(?!\d|[.,]\d)"
+        if re.search(pat, text) or re.search(pat, flat):
+            return True
+    return False
+
+
+def _squash(s: str) -> str:
+    """Case, whitespace, curly-quote and dash insensitive form used to compare a quote with the text."""
+    s = s.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    s = re.sub(r"[–—‑]", "-", s)
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 def normalise_term(term: Any) -> str | None:
@@ -178,8 +214,50 @@ def normalise_term(term: Any) -> str | None:
     return year.group(1)
 
 
-def validate(ans: dict[str, Any], text: str) -> dict[str, Any]:
-    """Keep only model answers that are allowed values AND grounded in the description."""
+def apply_evidence(ans: dict[str, Any], text: str) -> dict[str, Any]:
+    """Return a copy of the model answer where every value without valid evidence is set to None.
+
+    Valid evidence = the quoted snippet (a) appears in the title/description, ignoring case,
+    whitespace and curly quotes, and (b) itself contains the value: the season word, the year, both
+    pay figures, a work-mode word, a visa word. grad_years from the model is ignored.
+    """
+    ev = ans.get("evidence") if isinstance(ans.get("evidence"), dict) else {}
+    flat = _squash(text)
+    out = {k: v for k, v in ans.items() if k not in ("evidence", "grad_years")}
+
+    def quote(key: str) -> str | None:
+        q = ev.get(key)
+        return q if isinstance(q, str) and len(_squash(q)) >= 3 and _squash(q) in flat else None
+
+    season = out.get("season")
+    if not (isinstance(season, str) and any(re.search(re.escape(season), q, re.I)
+                                            for q in (quote("season"), quote("term")) if q)):
+        out["season"] = None
+    q, year = quote("term"), re.search(r"\b20\d\d\b", str(out.get("term") or ""))
+    if not (q and year and year.group(0) in q):
+        out["term"] = None
+    q, lo, hi = quote("pay"), out.get("pay_min"), out.get("pay_max")
+    if not (q and isinstance(lo, (int, float)) and isinstance(hi, (int, float))
+            and _money_seen(lo, q) and _money_seen(hi, q)):
+        out.update(pay_min=None, pay_max=None, pay_currency=None, pay_period=None)
+    q, wm = quote("work_mode"), out.get("work_mode")
+    if not (q and wm in MODE_WORDS and MODE_WORDS[wm].search(q)):
+        out["work_mode"] = None
+    q = quote("visa_sponsorship")
+    if not (q and out.get("visa_sponsorship") in ("yes", "no")
+            and re.search(r"sponsor|visa|work authori[sz]ation", q, re.I)):
+        out["visa_sponsorship"] = None
+    return out
+
+
+def validate(ans: dict[str, Any], text: str, require_evidence: bool = True) -> dict[str, Any]:
+    """Keep only model answers that are allowed values, backed by a quoted snippet, AND grounded in the text.
+
+    require_evidence=False reproduces the checks of prompt versions v2-v6 (no quotes, model-supplied
+    grad_years); eval/audit_llm.py uses it so old and new answers are judged by the same value checks.
+    """
+    if require_evidence:
+        ans = apply_evidence(ans, text)
     out: dict[str, Any] = {}
     cat = ans.get("category")
     out["category"] = cat if cat in CATEGORIES else "other"
@@ -189,6 +267,12 @@ def validate(ans: dict[str, Any], text: str) -> dict[str, Any]:
             and re.search(season, text, re.I):
         out["season"] = season.capitalize()
     term = normalise_term(ans.get("term"))
+    if term and "season" not in out:
+        # the model gave "Summer 2027" but left season empty: accept the season if the text says it
+        # next to that year ("summer of 2027", "Summer 2027")
+        m = re.fullmatch(r"(Summer|Fall|Winter|Spring) (20\d\d)", term)
+        if m and re.search(rf"\b{m.group(1)}\b\W+(?:of\W+)?{m.group(2)}\b", text, re.I):
+            out["season"] = m.group(1)
     if term and "season" not in out:
         # the season word is not in the text (model converted months, e.g. May-August -> Summer):
         # keep only the year, if the year itself is in the text
@@ -270,7 +354,7 @@ class LLMExtractor:
         user = f"Title: {job.title}\nLocation: {job.location}\n\nDescription:\n{job.description[:MAX_DESC_CHARS]}"
         try:
             msg = self.client.messages.create(
-                model=self.model, max_tokens=400, system=SYSTEM,
+                model=self.model, max_tokens=800, system=SYSTEM,
                 messages=[{"role": "user", "content": user}])
         except Exception as e:  # noqa: BLE001 - any API failure falls back to regex/heuristics
             with self._lock:
@@ -320,9 +404,10 @@ def enrich(job: Job, llm: LLMExtractor | None) -> str:
     # Title is searched too (NVIDIA puts "Summer 2027" only in the title).
     # When the model answered, its null is respected for term/season/mode (the regex cannot tell
     # a graduation date or company boilerplate from the real thing); regex only backs up pay,
-    # which is literal text. With no model answer, all regex results are used.
+    # which is literal text, and grad_years, which is regex-only. With no model answer, all regex
+    # results are used.
     for k, v in regex_extract(text).items():
-        if not ans or k.startswith("pay_"):
+        if not ans or k.startswith("pay_") or k == "grad_years":
             found.setdefault(k, v)
     if not ans:
         found["category"] = heuristic_category(job.title)
