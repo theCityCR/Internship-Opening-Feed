@@ -73,9 +73,9 @@ See `NOTE.md` for the numbers behind these.
 - Not filtered to software roles: design, marketing, finance etc. internships are included as category `other` (32 of 141).
 - `visa_sponsorship` is empty for all 141 postings because none of them state a sponsorship position; that is expected, not verified against a labelled example.
 - Date posted: Greenhouse `first_published`, Lever `createdAt`, Workday `startDate` (the "posted on" date); sources define "posted" differently.
-- Postings with several locations are one row (Stripe lists them in one string); NVIDIA postings with "2 Locations" show only the primary location.
+- Postings with several locations are one row: Stripe lists them in one string, and NVIDIA's extra locations are appended after the primary one, separated by `;`.
 - Pay: a posting with several location-specific ranges gets one range (the first found), not a per-location one.
-- Visa/graduation-year fields are model-extracted and **not** covered by the accuracy measurement.
+- Visa sponsorship (model, with quoted evidence) and graduation years (regex only) are **not** covered by the 15-posting accuracy measurement.
 - No retries beyond 3 per request; Workday rate-limiting at larger scale is untested.
 - Hand labels in `eval/labels.json` were drafted by an AI and need human verification (see `NOTE.md`).
 
