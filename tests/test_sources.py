@@ -41,6 +41,33 @@ def test_lever_normalises_and_uses_structured_commitment():
         assert j.date_posted and j.location
 
 
+def test_lever_workplace_type_becomes_source_work_mode():
+    data = load("lever_palantir.json")
+    res = LeverSource("palantir", "Palantir", "palantir").parse(data)
+    assert all(j.source_work_mode in ("onsite", "hybrid", "remote") for j in res.jobs)
+    data[0]["workplaceType"] = "unspecified"
+    assert LeverSource("p", "P", "p").parse(data).jobs[0].source_work_mode is None
+
+
+def test_source_work_mode_wins_over_text():
+    from feed.extract import enrich
+    from feed.models import Job
+    j = Job(source="s", company="c", job_id="1", title="Intern", location="x", date_posted=None,
+            apply_url="u", description="This is a remote role.", source_work_mode="hybrid")
+    enrich(j, None)
+    assert j.work_mode == "hybrid"
+    assert "source_work_mode" not in j.to_record()
+
+
+def test_workday_additional_locations_are_kept():
+    detail = {"jobPostingInfo": {"title": "Intern", "jobReqId": "JR1", "jobDescription": "<p>x</p>",
+                                 "location": "US, CA, Santa Clara",
+                                 "additionalLocations": ["US, TX, Austin", "US, CA, Santa Clara"],
+                                 "externalUrl": "https://x/y"}}
+    j = WorkdaySource("n", "N", "h", "t", "s", "https://x").parse_detail({"externalPath": "/p", "locationsText": "3 Locations"}, detail)
+    assert j.location == "US, CA, Santa Clara; US, TX, Austin"      # primary first, no duplicate
+
+
 def test_workday_facet_ids_resolved_from_labels():
     src = WorkdaySource("nvidia", "NVIDIA", "h", "t", "s", "https://x", country_facet=("locationHierarchy1", "United States"))
     applied = src.applied_facets(load("workday_list.json"))

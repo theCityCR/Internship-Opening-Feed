@@ -51,7 +51,8 @@ for src in get_sources():
                 v.append("pay min > max")
             if r["pay_period"] not in ("hour", "week", "month", "year"):
                 v.append(f"pay_period {r['pay_period']!r}")
-        if r["work_mode"] and not MODE_WORDS[r["work_mode"]].search(text):
+        if r["work_mode"] and r["work_mode"] != job.source_work_mode \
+                and not MODE_WORDS[r["work_mode"]].search(text):    # source field OR text must support it
             v.append(f"work_mode {r['work_mode']!r} unsupported")
         if r["visa_sponsorship"] and not re.search(r"sponsor|visa", text, re.I):
             v.append("visa unsupported")

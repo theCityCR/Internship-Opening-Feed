@@ -51,6 +51,11 @@ non-title hit is Palantir's "Meritocracy Fellowship" (Lever `commitment: Interns
 rather than a software one. The tool does not filter by discipline, so non-engineering internships are listed under
 category `other`. The `description` rule is unit-tested but has not matched anything on live data.
 
+## Information outside the description text
+The description is built from each source's text fields, but some facts live only in structured fields:
+- **Used:** Lever `workplaceType` (work mode, takes priority over text); Workday `additionalLocations` (appended to location, since the list page only says "2 Locations").
+- **Not used:** Greenhouse `offices` / `departments` / `education` (the education value is `education_required` for 19 of 20, so it says nothing useful), Greenhouse `updated_at`, Workday `postedOn` ("Posted 6 Days Ago", relative) and `timeType`, Lever `country`. Run `python eval/unused_fields.py` to list every field a source returns that is never read.
+
 ## How extraction works
 Regexes handle literal text (pay figures, "Summer 2027"). One Claude call per posting returns JSON; every answer is
 then checked against the description (a pay figure, season or term that isn't literally in the text is dropped, categories

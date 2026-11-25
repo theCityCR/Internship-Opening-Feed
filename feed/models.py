@@ -23,6 +23,7 @@ class Job:
     apply_url: str
     description: str = ""       # plain text; kept in memory/cache, not written to the feed
     structured_intern: bool = False   # the source's own structured field says "intern"
+    source_work_mode: str | None = None  # work mode stated by the source's own field (Lever workplaceType)
     internship_rule: str | None = None  # "title" | "structured" | "description"
     # --- filled by extract.py ---------------------------------------------
     category: str = "other"
@@ -48,6 +49,7 @@ class Job:
         d = asdict(self)
         d.pop("description")
         d.pop("structured_intern")
+        d.pop("source_work_mode")
         d["description_hash"] = self.description_hash
         return d
 

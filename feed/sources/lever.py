@@ -20,6 +20,9 @@ def _strip_tags(s: str) -> str:
     return html_to_text(s)
 
 
+_WORKPLACE = {"onsite": "onsite", "on-site": "onsite", "hybrid": "hybrid", "remote": "remote"}
+
+
 class LeverSource(Source):
     def __init__(self, name: str, company: str, slug: str):
         self.name, self.company, self.slug = name, company, slug
@@ -43,6 +46,8 @@ class LeverSource(Source):
                 location="; ".join(locs), date_posted=epoch_ms_to_date(j.get("createdAt")),
                 apply_url=j.get("hostedUrl") or j.get("applyUrl") or "",
                 description=desc, structured_intern=structured, internship_rule=rule,
+                # Lever's own field; "unspecified" (or anything else) stays empty
+                source_work_mode=_WORKPLACE.get((j.get("workplaceType") or "").lower()),
             ))
         return res
 

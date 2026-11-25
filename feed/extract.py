@@ -329,5 +329,7 @@ def enrich(job: Job, llm: LLMExtractor | None) -> str:
     for k in _FIELDS:
         if k in found:
             setattr(job, k, found[k])
+    if job.source_work_mode:          # the source's own field beats anything read from the text
+        job.work_mode = job.source_work_mode
     return method
 

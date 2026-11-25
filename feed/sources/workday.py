@@ -80,9 +80,12 @@ class WorkdaySource(Source):
         # The Job Type facet is itself a structured intern signal; title/description may add detail.
         rule = internship_rule(title, desc, structured=True)
         job_id = info.get("jobReqId") or (listing.get("bulletFields") or [""])[0]
+        # primary location first, then the posting's additional locations (listing says "2 Locations")
+        locs = [info.get("location") or listing.get("locationsText", "")]
+        locs += [x for x in info.get("additionalLocations") or [] if x not in locs]
         return Job(
             source=self.name, company=self.company, job_id=job_id, title=title,
-            location=info.get("location") or listing.get("locationsText", ""),
+            location="; ".join(x for x in locs if x),
             date_posted=info.get("startDate"),
             apply_url=info.get("externalUrl") or f"{self.apply_base}{listing['externalPath']}",
             description=desc, structured_intern=True, internship_rule=rule,
